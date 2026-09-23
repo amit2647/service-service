@@ -2,6 +2,7 @@ const express = require("express");
 
 const authenticate = require("../middleware/authenticate");
 const requirePermission = require("../middleware/requirePermission");
+const requireAnyPermission = require("../middleware/requireAnyPermission");
 
 const serviceController = require("../controllers/serviceController");
 
@@ -23,10 +24,17 @@ router.get(
   serviceController.getServices,
 );
 
+/*
+ * Reading one service is permitted to anyone who can read a lead or a customer:
+ * lead-service and customer-service call this to name the services attached to
+ * a record, and that same object is already embedded in what those callers
+ * receive. The catalog list above stays on services.read alone — that is the
+ * Services screen.
+ */
 router.get(
   "/services/:id",
   authenticate,
-  requirePermission("services.read"),
+  requireAnyPermission("services.read", "leads.read", "customers.read"),
   serviceController.getService,
 );
 
