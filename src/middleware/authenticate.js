@@ -24,7 +24,7 @@ async function authenticate(req, res, next) {
   try {
     const decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET || "omnicore-development-secret-change-this",
+      process.env.JWT_SECRET,
       {
         issuer: process.env.JWT_ISSUER || "omnicore-identity-service",
       },
