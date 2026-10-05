@@ -1,5 +1,7 @@
 const express = require("express");
 
+const bundleInstallController = require("../controllers/bundleInstallController");
+
 const authenticate = require("../middleware/authenticate");
 const requirePermission = require("../middleware/requirePermission");
 const requireAnyPermission = require("../middleware/requireAnyPermission");
@@ -12,6 +14,17 @@ const router = express.Router();
  * Health remains public.
  */
 router.get("/health", serviceController.health);
+
+/*
+ * The catalog step of a profession bundle install (bundle-service calls it
+ * with the installing admin's token). Declared before /services/:id.
+ */
+router.put(
+  "/services/bundles/:key/:version",
+  authenticate,
+  requirePermission("bundles.manage"),
+  bundleInstallController.installCatalog,
+);
 
 /*
  * Service catalog

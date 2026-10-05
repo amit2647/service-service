@@ -24,6 +24,7 @@ async function getAllServices(organizationId, search) {
       FROM services
       WHERE organization_id = $1
         AND status <> 'Inactive'
+        AND retired_at IS NULL
         AND (
           name ILIKE $2
           OR description ILIKE $2
@@ -48,6 +49,7 @@ async function getAllServices(organizationId, search) {
       FROM services
       WHERE organization_id = $1
         AND status <> 'Inactive'
+        AND retired_at IS NULL
       ORDER BY id DESC
       `,
       [organizationId],
