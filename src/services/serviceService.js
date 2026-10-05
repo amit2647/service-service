@@ -19,6 +19,8 @@ async function getAllServices(organizationId, search) {
         description,
         category,
         status,
+        key,
+        bundle_key,
         created_at,
         updated_at
       FROM services
@@ -44,6 +46,8 @@ async function getAllServices(organizationId, search) {
         description,
         category,
         status,
+        key,
+        bundle_key,
         created_at,
         updated_at
       FROM services
