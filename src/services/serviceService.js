@@ -84,6 +84,7 @@ async function getServiceById(serviceId, organizationId) {
     SELECT
       id,
       organization_id,
+      key,
       name,
       description,
       category,
