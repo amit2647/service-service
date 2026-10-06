@@ -1,5 +1,5 @@
 const pool = require("../config/database");
-const { decide } = require("./bundleSync");
+const { customized, decide, optionsFor } = require("./bundleSync");
 
 /*
  * The catalog step of a bundle install: the bundle's services and packages
@@ -19,13 +19,14 @@ function conflict(message) {
   return error;
 }
 
-async function inTransaction(work) {
+// A dry run does all the work and rolls it back, to report what it would do.
+async function inTransaction(work, { dryRun = false } = {}) {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
     const result = await work(client);
-    await client.query("COMMIT");
+    await client.query(dryRun ? "ROLLBACK" : "COMMIT");
     return result;
   } catch (error) {
     await client.query("ROLLBACK");
@@ -40,7 +41,7 @@ async function inTransaction(work) {
   }
 }
 
-async function upsert(client, { table, organizationId, bundleKey, version, item, content, insert, apply, summary }) {
+async function upsert(client, { table, kind, choices, organizationId, bundleKey, version, item, content, insert, apply, summary }) {
   const found = await client.query(
     `SELECT * FROM ${table}
      WHERE organization_id = $1 AND (key = $2 OR (key IS NULL AND name = $3))
@@ -52,7 +53,7 @@ async function upsert(client, { table, organizationId, bundleKey, version, item,
   const row = found.rows[0];
   const existing = row ? { content: content.current(row), sourceChecksum: row.source_checksum } : null;
   const shipped = content.shipped;
-  const { action, shippedChecksum, flag } = decide(existing, shipped);
+  const { action, shippedChecksum, flag, acknowledge } = decide(existing, shipped, optionsFor(choices, kind, item.key));
 
   if (action === "insert") {
     const id = await insert(shippedChecksum);
@@ -65,14 +66,17 @@ async function upsert(client, { table, organizationId, bundleKey, version, item,
   }
 
   if (action === "keep") {
+    // Dismissed: the firm keeps theirs and has seen this version (bundleSync).
     await client.query(
       `UPDATE ${table}
        SET key = $1, bundle_key = $2, retired_at = NULL,
-           update_available_version = CASE WHEN $3 THEN $4 ELSE update_available_version END
+           update_available_version = CASE WHEN $6 THEN NULL WHEN $3 THEN $4 ELSE update_available_version END,
+           source_checksum = CASE WHEN $6 THEN $7 ELSE source_checksum END
        WHERE id = $5`,
-      [item.key, bundleKey, flag, version, row.id],
+      [item.key, bundleKey, flag, version, row.id, Boolean(acknowledge), shippedChecksum],
     );
     summary.kept += 1;
+    if (flag) summary.customized.push(customized(kind, item.key, row.name, existing.content, shipped, version));
     return row.id;
   }
 
@@ -88,13 +92,13 @@ async function upsert(client, { table, organizationId, bundleKey, version, item,
   return row.id;
 }
 
-async function installCatalog(organizationId, bundleKey, version, catalog = {}) {
+async function installCatalog(organizationId, bundleKey, version, catalog = {}, choices = {}) {
   const groups = new Map((catalog.groups || []).map((group) => [group.key, group.label]));
   const services = catalog.services || [];
   const packages = catalog.packages || [];
 
   return inTransaction(async (client) => {
-    const summary = { inserted: 0, updated: 0, unchanged: 0, kept: 0, retired: 0 };
+    const summary = { inserted: 0, updated: 0, unchanged: 0, kept: 0, retired: 0, customized: [] };
     const serviceIds = new Map();
 
     for (const service of services) {
@@ -106,6 +110,8 @@ async function installCatalog(organizationId, bundleKey, version, catalog = {}) 
 
       const id = await upsert(client, {
         table: "services",
+        kind: "service",
+        choices,
         organizationId,
         bundleKey,
         version,
@@ -170,6 +176,8 @@ async function installCatalog(organizationId, bundleKey, version, catalog = {}) 
 
       await upsert(client, {
         table: "service_packages",
+        kind: "package",
+        choices,
         organizationId,
         bundleKey,
         version,
@@ -215,7 +223,7 @@ async function installCatalog(organizationId, bundleKey, version, catalog = {}) 
     }
 
     return summary;
-  });
+  }, choices);
 }
 
 module.exports = { installCatalog };

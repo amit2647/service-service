@@ -89,7 +89,51 @@ describe("installCatalog", () => {
 
     const adopt = find(/^UPDATE services SET key = \$1, bundle_key = \$2, retired_at = NULL/)[0];
 
-    assert.deepEqual(adopt.params, ["tax_audit", "ca-practice", true, "0.1.0", 7]);
+    assert.deepEqual(adopt.params.slice(0, 6), ["tax_audit", "ca-practice", true, "0.1.0", 7, false]);
+  });
+
+  test("reports what it keeps as the firm's, beside what the bundle ships", async () => {
+    rows.services.push({ id: 7, key: null, name: "Tax Audit", description: "Our own description", category: "Tax", source_checksum: null });
+
+    const summary = await installCatalog(3, "ca-practice", "0.1.0", CATALOG);
+
+    assert.deepEqual(summary.customized, [{
+      kind: "service",
+      key: "tax_audit",
+      name: "Tax Audit",
+      mine: { name: "Tax Audit", description: "Our own description", category: "Tax" },
+      theirs: { name: "Tax Audit", description: null, category: "Audit" },
+      version: "0.1.0",
+    }]);
+  });
+
+  test("accepting an item takes the bundle's version over the firm's", async () => {
+    rows.services.push({ id: 7, key: null, name: "Tax Audit", description: "Our own description", category: "Tax", source_checksum: null });
+
+    const summary = await installCatalog(3, "ca-practice", "0.1.0", CATALOG, { accept: new Set(["service:tax_audit"]) });
+
+    assert.equal(summary.updated, 1);
+    assert.deepEqual(find(/^UPDATE services SET name/)[0].params, ["Tax Audit", null, "Audit", 7]);
+    assert.deepEqual(summary.customized, []);
+  });
+
+  test("dismissing keeps the firm's version and records the bundle version as seen", async () => {
+    rows.services.push({ id: 7, key: null, name: "Tax Audit", description: "Our own description", category: "Tax", source_checksum: null });
+
+    const summary = await installCatalog(3, "ca-practice", "0.1.0", CATALOG, { dismiss: new Set(["service:tax_audit"]) });
+    const keep = find(/^UPDATE services SET key = \$1, bundle_key = \$2, retired_at = NULL/)[0];
+
+    assert.equal(find(/^UPDATE services SET name/).length, 0);
+    assert.equal(keep.params[5], true);
+    assert.match(keep.params[6], /^[0-9a-f]{64}$/);
+    assert.deepEqual(summary.customized, []);
+  });
+
+  test("a dry run does the work and rolls it back", async () => {
+    await installCatalog(3, "ca-practice", "0.1.0", CATALOG, { dryRun: true });
+
+    assert.equal(find(/^ROLLBACK/).length, 1);
+    assert.equal(find(/^COMMIT/).length, 0);
   });
 
   test("retires what the bundle no longer ships, never deletes it", async () => {

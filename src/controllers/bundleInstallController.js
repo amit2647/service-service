@@ -1,4 +1,5 @@
 const bundleInstallService = require("../services/bundleInstallService");
+const { choicesOf } = require("../services/bundleSync");
 
 const KEY = /^[a-z][a-z0-9-]{1,59}$/;
 const VERSION = /^\d+\.\d+\.\d+$/;
@@ -21,7 +22,7 @@ async function installCatalog(req, res) {
       return res.status(400).json({ error: "services must be a list" });
     }
 
-    const summary = await bundleInstallService.installCatalog(req.auth.organizationId, key, version, catalog);
+    const summary = await bundleInstallService.installCatalog(req.auth.organizationId, key, version, catalog, choicesOf(req));
 
     return res.json(summary);
   } catch (error) {
