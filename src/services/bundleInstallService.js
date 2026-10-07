@@ -11,6 +11,12 @@ const { customized, decide, optionsFor } = require("./bundleSync");
  * linked to the bundle key and treated as the firm's own — never duplicated.
  * Items the bundle stops shipping are retired, never deleted: customers and
  * leads may still reference them.
+ *
+ * The plain CRM's generic services, which the seed creates for every new
+ * installation (seeded_default, migration 021), do not belong to a profession:
+ * those nothing uses are removed, and any a lead, client, engagement or
+ * deadline still points at are switched off instead. A default the bundle
+ * adopted (it has a key) is the bundle's now and is left alone.
  */
 
 function conflict(message) {
@@ -98,7 +104,7 @@ async function installCatalog(organizationId, bundleKey, version, catalog = {}, 
   const packages = catalog.packages || [];
 
   return inTransaction(async (client) => {
-    const summary = { inserted: 0, updated: 0, unchanged: 0, kept: 0, retired: 0, customized: [] };
+    const summary = { inserted: 0, updated: 0, unchanged: 0, kept: 0, retired: 0, removedDefaults: 0, deactivatedDefaults: 0, customized: [] };
     const serviceIds = new Map();
 
     for (const service of services) {
@@ -221,6 +227,23 @@ async function installCatalog(organizationId, bundleKey, version, catalog = {}, 
       );
       summary.retired += retired.rowCount;
     }
+
+    const removed = await client.query(
+      `DELETE FROM services s
+       WHERE s.organization_id = $1 AND s.seeded_default AND s.bundle_key IS NULL AND s.key IS NULL
+         AND NOT EXISTS (SELECT 1 FROM lead_services x WHERE x.service_id = s.id)
+         AND NOT EXISTS (SELECT 1 FROM customer_services x WHERE x.service_id = s.id)
+         AND NOT EXISTS (SELECT 1 FROM engagement_lines x WHERE x.service_id = s.id)
+         AND NOT EXISTS (SELECT 1 FROM obligations x WHERE x.service_id = s.id)`,
+      [organizationId],
+    );
+    const deactivated = await client.query(
+      `UPDATE services SET status = 'Inactive', updated_at = NOW()
+       WHERE organization_id = $1 AND seeded_default AND bundle_key IS NULL AND key IS NULL AND status <> 'Inactive'`,
+      [organizationId],
+    );
+    summary.removedDefaults = removed.rowCount;
+    summary.deactivatedDefaults = deactivated.rowCount;
 
     return summary;
   }, choices);

@@ -36,6 +36,8 @@ function fakeClient() {
       if (/^INSERT INTO services /.test(sql)) return { rows: [{ id: 100 + statements.length }] };
       if (/^INSERT INTO service_packages /.test(sql)) return { rows: [{ id: 500 }] };
       if (/SET retired_at = NOW\(\)/.test(sql)) return { rowCount: 0 };
+      if (/^DELETE FROM services s/.test(sql)) return { rowCount: 3 };
+      if (/^UPDATE services SET status = 'Inactive'/.test(sql)) return { rowCount: 2 };
       return { rows: [], rowCount: 1 };
     },
     release() {},
@@ -129,6 +131,24 @@ describe("installCatalog", () => {
     assert.deepEqual(summary.customized, []);
   });
 
+  test("removes the plain CRM's unused default services, and switches off ones still in use", async () => {
+    const summary = await installCatalog(3, "ca-practice", "0.1.0", CATALOG);
+    const remove = find(/^DELETE FROM services s/)[0];
+    const switchOff = find(/^UPDATE services SET status = 'Inactive'/)[0];
+
+    assert.deepEqual(remove.params, [3]);
+    assert.match(remove.sql, /seeded_default AND s\.bundle_key IS NULL AND s\.key IS NULL/);
+    for (const table of ["lead_services", "customer_services", "engagement_lines", "obligations"]) {
+      assert.match(remove.sql, new RegExp(`NOT EXISTS \\(SELECT 1 FROM ${table} `));
+    }
+    assert.match(switchOff.sql, /seeded_default AND bundle_key IS NULL AND key IS NULL/);
+    assert.equal(summary.removedDefaults, 3);
+    assert.equal(summary.deactivatedDefaults, 2);
+    // After the bundle's own services, in the same transaction.
+    assert.ok(statements.indexOf(remove) > statements.indexOf(find(/^INSERT INTO services /)[0]));
+    assert.equal(find(/^COMMIT/).length, 1);
+  });
+
   test("a dry run does the work and rolls it back", async () => {
     await installCatalog(3, "ca-practice", "0.1.0", CATALOG, { dryRun: true });
 
@@ -142,7 +162,8 @@ describe("installCatalog", () => {
     const retire = find(/^UPDATE services SET retired_at = NOW\(\)/)[0];
 
     assert.deepEqual(retire.params, [3, "ca-practice", ["statutory_audit", "tax_audit"]]);
-    assert.equal(find(/^DELETE FROM services/).length, 0);
+    // The only delete is of the plain CRM's unused defaults, never a bundle item.
+    assert.ok(find(/^DELETE FROM services/).every((statement) => /seeded_default/.test(statement.sql)));
   });
 });
 
