@@ -85,6 +85,7 @@ async function getServiceById(serviceId, organizationId) {
       id,
       organization_id,
       key,
+      bundle_key,
       name,
       description,
       category,
@@ -185,6 +186,33 @@ async function getActiveServiceById(serviceId, organizationId) {
  * =========================================================
  */
 
+/*
+ * A service's permanent key, from its name ("GST Returns" → gst_returns), as
+ * bundle services have one: deadline rules attach to services by key. Lower
+ * case with underscores, starting with a letter, at most 50 characters; a
+ * number is appended when the organization already has that key. Migration
+ * 022 gave existing services theirs the same way. Never changed afterwards.
+ */
+function keyBase(name) {
+  const base = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return (/^[a-z][a-z0-9_]/.test(base) ? base : `s_${base}`).slice(0, 50);
+}
+
+async function uniqueKey(organizationId, name) {
+  const base = keyBase(name);
+  const taken = await pool.query(
+    "SELECT key FROM services WHERE organization_id = $1 AND (key = $2 OR key LIKE $3)",
+    [organizationId, base, `${base}\\_%`],
+  );
+  const used = new Set(taken.rows.map((row) => row.key));
+
+  if (!used.has(base)) return base;
+
+  let number = 2;
+  while (used.has(`${base}_${number}`)) number += 1;
+  return `${base}_${number}`;
+}
+
 async function createService(data) {
   try {
     const result = await pool.query(
@@ -195,10 +223,11 @@ async function createService(data) {
           name,
           description,
           category,
-          status
+          status,
+          key
         )
       VALUES
-        ($1, $2, $3, $4, $5)
+        ($1, $2, $3, $4, $5, $6)
       RETURNING *
       `,
       [
@@ -207,6 +236,7 @@ async function createService(data) {
         data.description || null,
         data.category || null,
         data.status || "Active",
+        await uniqueKey(data.organizationId, data.name.trim()),
       ],
     );
 
@@ -382,6 +412,7 @@ async function checkHealth() {
 }
 
 module.exports = {
+  keyBase,
   getAllServices,
   getServiceById,
   getActiveServiceById,
