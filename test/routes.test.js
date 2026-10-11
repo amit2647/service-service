@@ -1,6 +1,5 @@
 const { describe, test, before, after, mock } = require("node:test");
 const assert = require("node:assert/strict");
-const jwt = require("jsonwebtoken");
 
 /*
  * The permission convention from CLAUDE.md, checked on the real routes:
@@ -9,8 +8,10 @@ const jwt = require("jsonwebtoken");
  * list GET /services stays on services.read alone.
  */
 
-process.env.JWT_SECRET = "unit-test-secret";
-process.env.JWT_ISSUER = "unit-test-issuer";
+// Hydra's tokens, signed with a test key served as a stubbed JWKS.
+const hydra = require("./helpers/hydraToken");
+
+before(() => hydra.ready);
 
 const SERVICE_ROW = { id: 1, organization_id: 3, name: "CRM Implementation", status: "Active" };
 
@@ -37,11 +38,7 @@ before(async () => {
 after(() => server.close());
 
 function tokenWith(permissions) {
-  return jwt.sign(
-    { sub: 7, organizationId: 3, role: "TEST", permissions },
-    process.env.JWT_SECRET,
-    { issuer: process.env.JWT_ISSUER, expiresIn: "5m" },
-  );
+  return hydra.sign({ sub: 7, organizationId: 3, role: "TEST", permissions });
 }
 
 async function get(path, permissions) {
